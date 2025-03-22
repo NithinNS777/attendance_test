@@ -1,27 +1,22 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // For WriteBuffer
+import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:camera/camera.dart';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
-import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart'; // Updated import
+import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:tflite_flutter/tflite_flutter.dart';
 import 'package:image/image.dart' as img;
 import 'package:permission_handler/permission_handler.dart';
 import 'dart:typed_data';
-import 'dart:collection'; // For UnmodifiableUint8ListView
+import 'dart:math';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
-  // Initialize Firebase
   await Firebase.initializeApp();
-
-  // Request permissions
   await Permission.camera.request();
   await Permission.storage.request();
-
   runApp(MyApp());
 }
 
@@ -29,12 +24,79 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Attendance App',
+      title: 'Face Attendance',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         useMaterial3: true,
       ),
-      home: MyHomePage(title: 'Attendance App'),
+      home: InitialScreen(),
+    );
+  }
+}
+
+class InitialScreen extends StatelessWidget {
+  Future<void> _navigateToCompareScreen(BuildContext context) async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => CameraScreen(isCompareMode: true),
+      ),
+    );
+
+    if (result != null && result is Map<String, dynamic>) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Attendance marked for ${result['username']} (Roll No: ${result['rollNo']})'),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 3),
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No match found'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Face Attendance'),
+        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+      ),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            ElevatedButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => MyHomePage(title: 'Face Attendance'),
+                  ),
+                );
+              },
+              child: const Text('Register'),
+              style: ElevatedButton.styleFrom(
+                minimumSize: const Size(200, 50),
+              ),
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: () => _navigateToCompareScreen(context),
+              child: const Text('Compare'),
+              style: ElevatedButton.styleFrom(
+                minimumSize: const Size(200, 50),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -66,6 +128,11 @@ class _MyHomePageState extends State<MyHomePage> {
       setState(() {
         students = snapshot.docs.map((doc) => doc.data() as Map<String, dynamic>).toList();
       });
+      // Log all stored embeddings for inspection
+      print('Registered students in Firestore:');
+      for (var student in students) {
+        print('Username: ${student['username']}, Embedding sample: ${student['faceEmbedding'].sublist(0, 5)}...');
+      }
     } catch (e) {
       print('Error fetching students: $e');
     }
@@ -75,7 +142,7 @@ class _MyHomePageState extends State<MyHomePage> {
     final result = await Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => CameraScreen(),
+        builder: (context) => CameraScreen(isCompareMode: false),
       ),
     );
 
@@ -104,6 +171,7 @@ class _MyHomePageState extends State<MyHomePage> {
           backgroundColor: Colors.green,
         ),
       );
+      _fetchStudents();
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -180,7 +248,6 @@ class _MyHomePageState extends State<MyHomePage> {
                 ),
               ),
             ),
-            // Student list
             const SizedBox(height: 24),
             const Text(
               'Registered Students',
@@ -188,7 +255,7 @@ class _MyHomePageState extends State<MyHomePage> {
             ),
             ListView.builder(
               shrinkWrap: true,
-              physics: NeverScrollableScrollPhysics(),
+              physics: const NeverScrollableScrollPhysics(),
               itemCount: students.length,
               itemBuilder: (context, index) {
                 final student = students[index];
@@ -214,6 +281,10 @@ class _MyHomePageState extends State<MyHomePage> {
 }
 
 class CameraScreen extends StatefulWidget {
+  final bool isCompareMode;
+
+  const CameraScreen({Key? key, required this.isCompareMode}) : super(key: key);
+
   @override
   _CameraScreenState createState() => _CameraScreenState();
 }
@@ -224,23 +295,22 @@ class _CameraScreenState extends State<CameraScreen> {
   bool _isProcessing = false;
   late Interpreter _interpreter;
   late FaceDetector _faceDetector;
-  Face? detectedFace;
-  Size? imageSize;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   @override
   void initState() {
     super.initState();
-    _initializeCamera();
     _loadModel();
-    // Updated FaceDetector instantiation for google_mlkit_face_detection
     _faceDetector = FaceDetector(
       options: FaceDetectorOptions(
-        enableLandmarks: true,
-        enableClassification: true,
-        enableTracking: true,
-        performanceMode: FaceDetectorMode.accurate,
+        enableLandmarks: false,
+        enableClassification: false,
+        enableTracking: false,
+        performanceMode: FaceDetectorMode.fast,
+        minFaceSize: 0.1,
       ),
     );
+    _initializeCamera();
   }
 
   Future<void> _loadModel() async {
@@ -255,7 +325,6 @@ class _CameraScreenState extends State<CameraScreen> {
 
   Future<void> _initializeCamera() async {
     try {
-      // Request camera permission
       final status = await Permission.camera.request();
       if (status.isDenied) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -267,10 +336,7 @@ class _CameraScreenState extends State<CameraScreen> {
         return;
       }
 
-      print('Getting available cameras...');
       final cameras = await availableCameras();
-      print('Available cameras: ${cameras.length}');
-
       if (cameras.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -281,31 +347,25 @@ class _CameraScreenState extends State<CameraScreen> {
         return;
       }
 
-      print('Selecting front camera...');
       final frontCamera = cameras.firstWhere(
         (camera) => camera.lensDirection == CameraLensDirection.front,
         orElse: () => cameras.first,
       );
-      print('Selected camera: ${frontCamera.name}');
 
-      print('Initializing camera controller...');
       _cameraController = CameraController(
         frontCamera,
-        ResolutionPreset.medium, // Changed to medium for better compatibility
+        ResolutionPreset.medium,
         enableAudio: false,
-        imageFormatGroup: ImageFormatGroup.jpeg,
+        imageFormatGroup: ImageFormatGroup.yuv420,
       );
 
-      print('Waiting for controller initialization...');
       await _cameraController.initialize();
-      print('Camera controller initialized');
-
       if (!mounted) return;
 
       setState(() {
         _isCameraInitialized = true;
+        print('Camera initialized');
       });
-      print('Camera initialization complete');
     } catch (e) {
       print('Error initializing camera: $e');
       if (mounted) {
@@ -326,7 +386,6 @@ class _CameraScreenState extends State<CameraScreen> {
 
     if (image == null) throw Exception('Failed to decode image');
 
-    // Crop face region using updated copyCrop method
     final boundingBox = face.boundingBox;
     final croppedImage = img.copyCrop(
       image,
@@ -336,10 +395,8 @@ class _CameraScreenState extends State<CameraScreen> {
       height: boundingBox.height.toInt(),
     );
 
-    // Resize to FaceNet input size
     final resizedImage = img.copyResize(croppedImage, width: 160, height: 160);
 
-    // Convert to float array and normalize
     var input = List<List<List<List<double>>>>.filled(
       1,
       List<List<List<double>>>.filled(
@@ -363,42 +420,44 @@ class _CameraScreenState extends State<CameraScreen> {
     var output = List<List<double>>.filled(1, List<double>.filled(128, 0));
     _interpreter.run(input, output);
 
+    print('Generated embedding sample: ${output[0].sublist(0, 5)}...');
     return output[0];
   }
 
-  Future<void> _processImage(CameraImage image) async {
-    if (_isProcessing) return;
-    _isProcessing = true;
+  double _calculateEuclideanDistance(List<double> embedding1, List<double> embedding2) {
+    if (embedding1.length != embedding2.length) return double.infinity;
+    double sum = 0;
+    for (int i = 0; i < embedding1.length; i++) {
+      sum += pow(embedding1[i] - embedding2[i], 2);
+    }
+    return sqrt(sum);
+  }
 
-    try {
-      final WriteBuffer allBytes = WriteBuffer();
-      for (final Plane plane in image.planes) {
-        allBytes.putUint8List(plane.bytes);
+  Future<Map<String, dynamic>?> _compareEmbedding(List<double> newEmbedding) async {
+    print('Comparing embedding with Firestore');
+    print('New embedding sample: ${newEmbedding.sublist(0, 5)}...');
+    final QuerySnapshot snapshot = await _firestore.collection('students').get();
+    const double threshold = 1.0;
+    Map<String, dynamic>? bestMatch;
+    double minDistance = double.infinity;
+
+    for (var doc in snapshot.docs) {
+      final data = doc.data() as Map<String, dynamic>;
+      final storedEmbedding = (data['faceEmbedding'] as List<dynamic>).cast<double>();
+      final distance = _calculateEuclideanDistance(newEmbedding, storedEmbedding);
+      print('Distance to ${data['username']} (Roll No: ${data['rollNo']}): $distance');
+      if (distance < minDistance) {
+        minDistance = distance;
+        bestMatch = data;
       }
-      final bytes = allBytes.done().buffer.asUint8List();
+    }
 
-      final Size imageSize = Size(image.width.toDouble(), image.height.toDouble());
-      final inputImage = InputImage.fromBytes(
-        bytes: bytes,
-        metadata: InputImageMetadata(
-          size: imageSize,
-          rotation: InputImageRotation.rotation0deg,
-          format: InputImageFormat.bgra8888,
-          bytesPerRow: image.planes[0].bytesPerRow,
-        ),
-      );
-
-      final faces = await _faceDetector.processImage(inputImage);
-      if (faces.isNotEmpty) {
-        setState(() {
-          detectedFace = faces.first;
-          this.imageSize = imageSize;
-        });
-      }
-    } catch (e) {
-      print('Error processing image: $e');
-    } finally {
-      _isProcessing = false;
+    if (minDistance < threshold && bestMatch != null) {
+      print('Best match found: ${bestMatch['username']} with distance $minDistance');
+      return bestMatch;
+    } else {
+      print('No match found within threshold $threshold, closest distance was $minDistance');
+      return null;
     }
   }
 
@@ -411,26 +470,58 @@ class _CameraScreenState extends State<CameraScreen> {
 
     try {
       final image = await _cameraController.takePicture();
+      print('Photo captured at: ${image.path}');
 
-      // Detect face using ML Kit
-      final inputImage = InputImage.fromFilePath(image.path);
-      final faces = await _faceDetector.processImage(inputImage);
+      // Save the photo for debugging
+      final directory = await getTemporaryDirectory();
+      final debugPath = '${directory.path}/${widget.isCompareMode ? 'compare' : 'register'}_photo_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      await File(image.path).copy(debugPath);
+      print('Photo saved for debug at: $debugPath');
 
-      if (faces.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('No face detected. Please try again.'),
-            backgroundColor: Colors.red,
-          ),
-        );
-        return;
+      // Try different rotations to ensure correct orientation
+      for (var rotation in [
+        InputImageRotation.rotation0deg,
+        InputImageRotation.rotation90deg,
+        InputImageRotation.rotation270deg,
+      ]) {
+        final inputImage = InputImage.fromFilePath(image.path);
+
+        print('Running face detection with rotation: $rotation');
+        final faces = await _faceDetector.processImage(inputImage);
+        print('Detected ${faces.length} faces with rotation: $rotation');
+
+        if (faces.isNotEmpty) {
+          print('Face detected successfully');
+          final faceEmbedding = await _getFaceEmbedding(image.path, faces.first);
+
+          if (widget.isCompareMode) {
+            // Simulate scanning delay
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Scanning...'),
+                backgroundColor: Colors.blue,
+                duration: Duration(seconds: 2),
+              ),
+            );
+            await Future.delayed(const Duration(seconds: 2));
+
+            final match = await _compareEmbedding(faceEmbedding);
+            Navigator.pop(context, match); // Return match or null
+          } else {
+            Navigator.pop(context, faceEmbedding); // Return embedding for registration
+          }
+          return; // Exit after successful detection
+        }
       }
 
-      // Get face embedding using FaceNet
-      final faceEmbedding = await _getFaceEmbedding(image.path, faces.first);
-
-      // Return the embedding to previous screen
-      Navigator.pop(context, faceEmbedding);
+      // If no faces detected after all rotations
+      print('No face detected in captured photo after trying all rotations');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No face detected. Please try again.'),
+          backgroundColor: Colors.red,
+        ),
+      );
     } catch (e) {
       print('Error in face detection: $e');
       ScaffoldMessenger.of(context).showSnackBar(
@@ -449,19 +540,11 @@ class _CameraScreenState extends State<CameraScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Take Photo')),
+      appBar: AppBar(title: Text(widget.isCompareMode ? 'Compare Face' : 'Register Face')),
       body: _isCameraInitialized
           ? Stack(
               children: [
                 CameraPreview(_cameraController),
-                if (detectedFace != null && imageSize != null)
-                  CustomPaint(
-                    painter: FacePainter(
-                      face: detectedFace!,
-                      imageSize: imageSize!,
-                      previewSize: MediaQuery.of(context).size,
-                    ),
-                  ),
                 Positioned(
                   bottom: 20,
                   left: 0,
@@ -470,7 +553,7 @@ class _CameraScreenState extends State<CameraScreen> {
                     child: ElevatedButton.icon(
                       onPressed: _isProcessing ? null : _captureAndAnalyze,
                       icon: const Icon(Icons.camera),
-                      label: Text(_isProcessing ? 'Processing...' : 'Capture Photo'),
+                      label: Text(_isProcessing ? 'Processing...' : (widget.isCompareMode ? 'Scan' : 'Submit')),
                       style: ElevatedButton.styleFrom(
                         minimumSize: const Size(200, 50),
                       ),
@@ -485,59 +568,11 @@ class _CameraScreenState extends State<CameraScreen> {
 
   @override
   void dispose() {
-    _cameraController.dispose();
+    if (_isCameraInitialized) {
+      _cameraController.dispose();
+    }
     _interpreter.close();
     _faceDetector.close();
     super.dispose();
   }
-}
-
-class FacePainter extends CustomPainter {
-  final Face face;
-  final Size imageSize;
-  final Size previewSize;
-
-  FacePainter({
-    required this.face,
-    required this.imageSize,
-    required this.previewSize,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final Paint paint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.0
-      ..color = Colors.red;
-
-    final double scaleX = previewSize.width / imageSize.width;
-    final double scaleY = previewSize.height / imageSize.height;
-
-    final Rect scaledRect = Rect.fromLTRB(
-      face.boundingBox.left * scaleX,
-      face.boundingBox.top * scaleY,
-      face.boundingBox.right * scaleX,
-      face.boundingBox.bottom * scaleY,
-    );
-
-    canvas.drawRect(scaledRect, paint);
-
-    // Draw facial landmarks with updated API
-    paint.color = Colors.blue;
-    face.landmarks.forEach((type, landmark) {
-      if (landmark != null) {
-        canvas.drawCircle(
-          Offset(
-            landmark.position.x * scaleX,
-            landmark.position.y * scaleY,
-          ),
-          2,
-          paint,
-        );
-      }
-    });
-  }
-
-  @override
-  bool shouldRepaint(FacePainter oldDelegate) => true;
 }
