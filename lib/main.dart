@@ -11,12 +11,14 @@ import 'package:image/image.dart' as img;
 import 'package:permission_handler/permission_handler.dart';
 import 'dart:typed_data';
 import 'dart:math';
+import 'package:nfc_manager/nfc_manager.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
   await Permission.camera.request();
   await Permission.storage.request();
+  // NFC permission is handled by AndroidManifest.xml; no Permission.nfc.request() needed
   runApp(MyApp());
 }
 
@@ -34,8 +36,64 @@ class MyApp extends StatelessWidget {
   }
 }
 
-class InitialScreen extends StatelessWidget {
-  Future<void> _navigateToCompareScreen(BuildContext context) async {
+class InitialScreen extends StatefulWidget {
+  @override
+  _InitialScreenState createState() => _InitialScreenState();
+}
+
+class _InitialScreenState extends State<InitialScreen> {
+  @override
+  void initState() {
+    super.initState();
+    _startNfcListening();
+  }
+
+  Future<void> _startNfcListening() async {
+    bool isNfcAvailable = await NfcManager.instance.isAvailable();
+    print('NFC Availability Check: $isNfcAvailable'); // Debug log
+    if (!isNfcAvailable) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('NFC is not available or enabled on this device'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    NfcManager.instance.startSession(onDiscovered: (NfcTag tag) async {
+      print('NFC Tag Detected'); // Debug log
+      final result = await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => CameraScreen(isCompareMode: true),
+        ),
+      );
+
+      if (result != null && result is Map<String, dynamic>) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+                'Attendance marked for ${result['username']} (Roll No: ${result['rollNo']})'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 3),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No match found'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+
+      NfcManager.instance.stopSession();
+      _startNfcListening(); // Restart listening
+    });
+  }
+
+  Future<void> _navigateToCompareScreen() async {
     final result = await Navigator.push(
       context,
       MaterialPageRoute(
@@ -46,7 +104,8 @@ class InitialScreen extends StatelessWidget {
     if (result != null && result is Map<String, dynamic>) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Attendance marked for ${result['username']} (Roll No: ${result['rollNo']})'),
+          content: Text(
+              'Attendance marked for ${result['username']} (Roll No: ${result['rollNo']})'),
           backgroundColor: Colors.green,
           duration: Duration(seconds: 3),
         ),
@@ -88,16 +147,27 @@ class InitialScreen extends StatelessWidget {
             ),
             const SizedBox(height: 20),
             ElevatedButton(
-              onPressed: () => _navigateToCompareScreen(context),
-              child: const Text('Compare'),
+              onPressed: _navigateToCompareScreen,
+              child: const Text('Compare (Manual)'),
               style: ElevatedButton.styleFrom(
                 minimumSize: const Size(200, 50),
               ),
+            ),
+            const SizedBox(height: 20),
+            const Text(
+              'Tap an NFC sticker to mark attendance',
+              style: TextStyle(fontSize: 16, fontStyle: FontStyle.italic),
             ),
           ],
         ),
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    NfcManager.instance.stopSession();
+    super.dispose();
   }
 }
 
@@ -128,7 +198,6 @@ class _MyHomePageState extends State<MyHomePage> {
       setState(() {
         students = snapshot.docs.map((doc) => doc.data() as Map<String, dynamic>).toList();
       });
-      // Log all stored embeddings for inspection
       print('Registered students in Firestore:');
       for (var student in students) {
         print('Username: ${student['username']}, Embedding sample: ${student['faceEmbedding'].sublist(0, 5)}...');
@@ -366,6 +435,12 @@ class _CameraScreenState extends State<CameraScreen> {
         _isCameraInitialized = true;
         print('Camera initialized');
       });
+
+      if (widget.isCompareMode) {
+        Future.delayed(Duration(seconds: 1), () {
+          if (mounted) _captureAndAnalyze();
+        });
+      }
     } catch (e) {
       print('Error initializing camera: $e');
       if (mounted) {
@@ -472,13 +547,11 @@ class _CameraScreenState extends State<CameraScreen> {
       final image = await _cameraController.takePicture();
       print('Photo captured at: ${image.path}');
 
-      // Save the photo for debugging
       final directory = await getTemporaryDirectory();
       final debugPath = '${directory.path}/${widget.isCompareMode ? 'compare' : 'register'}_photo_${DateTime.now().millisecondsSinceEpoch}.jpg';
       await File(image.path).copy(debugPath);
       print('Photo saved for debug at: $debugPath');
 
-      // Try different rotations to ensure correct orientation
       for (var rotation in [
         InputImageRotation.rotation0deg,
         InputImageRotation.rotation90deg,
@@ -495,7 +568,6 @@ class _CameraScreenState extends State<CameraScreen> {
           final faceEmbedding = await _getFaceEmbedding(image.path, faces.first);
 
           if (widget.isCompareMode) {
-            // Simulate scanning delay
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
                 content: Text('Scanning...'),
@@ -506,15 +578,14 @@ class _CameraScreenState extends State<CameraScreen> {
             await Future.delayed(const Duration(seconds: 2));
 
             final match = await _compareEmbedding(faceEmbedding);
-            Navigator.pop(context, match); // Return match or null
+            Navigator.pop(context, match);
           } else {
-            Navigator.pop(context, faceEmbedding); // Return embedding for registration
+            Navigator.pop(context, faceEmbedding);
           }
-          return; // Exit after successful detection
+          return;
         }
       }
 
-      // If no faces detected after all rotations
       print('No face detected in captured photo after trying all rotations');
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -545,21 +616,22 @@ class _CameraScreenState extends State<CameraScreen> {
           ? Stack(
               children: [
                 CameraPreview(_cameraController),
-                Positioned(
-                  bottom: 20,
-                  left: 0,
-                  right: 0,
-                  child: Center(
-                    child: ElevatedButton.icon(
-                      onPressed: _isProcessing ? null : _captureAndAnalyze,
-                      icon: const Icon(Icons.camera),
-                      label: Text(_isProcessing ? 'Processing...' : (widget.isCompareMode ? 'Scan' : 'Submit')),
-                      style: ElevatedButton.styleFrom(
-                        minimumSize: const Size(200, 50),
+                if (!widget.isCompareMode)
+                  Positioned(
+                    bottom: 20,
+                    left: 0,
+                    right: 0,
+                    child: Center(
+                      child: ElevatedButton.icon(
+                        onPressed: _isProcessing ? null : _captureAndAnalyze,
+                        icon: const Icon(Icons.camera),
+                        label: Text(_isProcessing ? 'Processing...' : 'Submit'),
+                        style: ElevatedButton.styleFrom(
+                          minimumSize: const Size(200, 50),
+                        ),
                       ),
                     ),
                   ),
-                ),
               ],
             )
           : const Center(child: CircularProgressIndicator()),

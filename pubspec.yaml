@@ -34,13 +34,14 @@ dependencies:
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
+  nfc_manager: ^3.2.0
   cupertino_icons: ^1.0.8
   collection: ^1.18.0
   firebase_core: ^2.24.2
   cloud_firestore: ^4.14.0
   camera: ^0.10.5+9
   path_provider: ^2.1.2
-  permission_handler: ^11.2.0
+  permission_handler: ^11.4.0
   firebase_storage: ^11.6.0
   google_mlkit_face_detection: ^0.9.0  # Replace google_ml_kit
   tflite_flutter: ^0.11.0
