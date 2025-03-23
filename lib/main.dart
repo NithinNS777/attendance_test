@@ -49,53 +49,160 @@ class InitialScreen extends StatefulWidget {
 }
 
 class _InitialScreenState extends State<InitialScreen> {
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  List<Map<String, dynamic>> _timetable = [];
+  bool _isLoadingTimetable = true;
+
   @override
   void initState() {
     super.initState();
+    _fetchTimetable();
     _startNfcListening();
+  }
+
+  Future<void> _fetchTimetable() async {
+    try {
+      print('Fetching timetable...');
+      final snapshot = await _firestore.collection('timetable').get();
+      setState(() {
+        _timetable = snapshot.docs.map((doc) => doc.data()).toList();
+        _isLoadingTimetable = false;
+      });
+      print('Timetable fetched successfully: $_timetable');
+      if (_timetable.isEmpty) {
+        print('Warning: Timetable is empty!');
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Timetable is empty. Check Firestore setup.')),
+        );
+      }
+    } catch (e) {
+      print('Error fetching timetable: $e');
+      setState(() {
+        _isLoadingTimetable = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error fetching timetable: $e')),
+      );
+    }
+  }
+
+  String? _getCurrentSubject(DateTime now) {
+    print('Determining current subject at: $now');
+    for (var entry in _timetable) {
+      final subject = entry['subject'] as String?;
+      final startHour = entry['startHour'] as int?;
+      final startMinute = entry['startMinute'] as int?;
+      final endHour = entry['endHour'] as int?;
+      final endMinute = entry['endMinute'] as int?;
+
+      if (subject == null || startHour == null || startMinute == null || endHour == null || endMinute == null) {
+        print('Invalid timetable entry: $entry');
+        continue;
+      }
+
+      DateTime start = DateTime(now.year, now.month, now.day, startHour, startMinute);
+      DateTime end = DateTime(now.year, now.month, now.day, endHour, endMinute);
+
+      print('Checking $subject: $start to $end');
+      if (now.isAfter(start) && now.isBefore(end)) {
+        print('Current subject: $subject');
+        return subject;
+      }
+    }
+    print('No subject scheduled at this time');
+    return null;
+  }
+
+  Future<bool> _isAttendanceMarked(String rollNo, String subject) async {
+    try {
+      final snapshot = await _firestore
+          .collection('attendance')
+          .where('rollNo', isEqualTo: rollNo) // Changed from nfcId to rollNo
+          .where('subject', isEqualTo: subject)
+          .where('date', isEqualTo: DateTime.now().toIso8601String().substring(0, 10))
+          .get();
+      print('Attendance check for $subject (Roll No: $rollNo): ${snapshot.docs.isNotEmpty ? 'Already marked' : 'Not marked'}');
+      return snapshot.docs.isNotEmpty;
+    } catch (e) {
+      print('Error checking attendance: $e');
+      return false;
+    }
+  }
+
+  Future<void> _markAttendance(String nfcId, String subject, Map<String, dynamic> studentData) async {
+    try {
+      print('Attempting to mark attendance for ${studentData['username']} in $subject with NFC ID: $nfcId');
+      await _firestore.collection('attendance').add({
+        'nfcId': nfcId,
+        'subject': subject,
+        'date': DateTime.now().toIso8601String().substring(0, 10),
+        'timestamp': FieldValue.serverTimestamp(),
+        'username': studentData['username'],
+        'rollNo': studentData['rollNo'],
+      });
+      print('Attendance successfully marked in Firestore for ${studentData['username']}');
+    } catch (e) {
+      print('Error marking attendance: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error marking attendance: $e')),
+      );
+    }
   }
 
   Future<void> _startNfcListening() async {
     bool isNfcAvailable = await NfcManager.instance.isAvailable();
-    print('NFC Availability Check: $isNfcAvailable');
+    print('NFC Availability: $isNfcAvailable');
     if (!isNfcAvailable) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('NFC is not available or enabled on this device'),
-          backgroundColor: Colors.red,
-        ),
+        const SnackBar(content: Text('NFC is not available or enabled'), backgroundColor: Colors.red),
       );
       return;
     }
 
     NfcManager.instance.startSession(onDiscovered: (NfcTag tag) async {
       print('NFC Tag Detected');
-      // Get the NFC UID
       var identifier = tag.data['nfca']['identifier'];
-      String nfcId = identifier
-          .map((e) => e.toRadixString(16).padLeft(2, '0'))
-          .join(':')
-          .toUpperCase(); // Ensure consistent formatting
+      String nfcId = identifier.map((e) => e.toRadixString(16).padLeft(2, '0')).join(':').toUpperCase();
       print('Scanned NFC ID: $nfcId');
 
-      // Define the target NFC UID
       const String targetNfcId = '53:1E:97:86:12:00:01';
 
-      // Only proceed if the scanned NFC ID matches the target
       if (nfcId == targetNfcId) {
-        print('Target NFC ID matched: $targetNfcId');
+        print('NFC ID matched');
+        DateTime now = DateTime.now().toLocal();
+        String? currentSubject = _getCurrentSubject(now);
+        print('Current time: $now, Subject: $currentSubject');
+
+        if (currentSubject == null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No class scheduled at this time'), backgroundColor: Colors.orange),
+          );
+          NfcManager.instance.stopSession();
+          _startNfcListening();
+          return;
+        }
+
         final result = await Navigator.push(
           context,
-          MaterialPageRoute(
-            builder: (context) => CameraScreen(isCompareMode: true),
-          ),
+          MaterialPageRoute(builder: (context) => CameraScreen(isCompareMode: true)),
         );
 
         if (result != null && result is Map<String, dynamic>) {
+          bool alreadyMarked = await _isAttendanceMarked(result['rollNo'], currentSubject);
+          if (alreadyMarked) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Attendance already marked for $currentSubject today for ${result['username']}'), backgroundColor: Colors.orange),
+            );
+            NfcManager.instance.stopSession();
+            _startNfcListening();
+            return;
+          }
+
+          await _markAttendance(nfcId, currentSubject, result);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
-                'Attendance marked for ${result['username']} (Roll No: ${result['rollNo']})',
+                'Attendance marked for ${result['username']} (Roll No: ${result['rollNo']}) in $currentSubject',
                 style: const TextStyle(color: Colors.white),
               ),
               backgroundColor: Colors.green,
@@ -115,29 +222,25 @@ class _InitialScreenState extends State<InitialScreen> {
           );
         }
       } else {
-        print('NFC ID $nfcId does not match target $targetNfcId');
+        print('NFC ID mismatch: $nfcId != $targetNfcId');
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Unrecognized NFC tag: $nfcId'),
-            backgroundColor: Colors.orange,
-          ),
+          SnackBar(content: Text('Unrecognized NFC tag: $nfcId'), backgroundColor: Colors.orange),
         );
       }
 
       NfcManager.instance.stopSession();
-      _startNfcListening(); // Restart listening for the next tap
+      _startNfcListening();
     });
   }
 
   Future<void> _navigateToCompareScreen() async {
     final result = await Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (context) => CameraScreen(isCompareMode: true),
-      ),
+      MaterialPageRoute(builder: (context) => CameraScreen(isCompareMode: true)),
     );
 
     if (result != null && result is Map<String, dynamic>) {
+      await _markAttendance('manual_test_nfc', 'ManualTest', result);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -166,86 +269,63 @@ class _InitialScreenState extends State<InitialScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          'Face Attendance',
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
+        title: const Text('Face Attendance', style: TextStyle(fontWeight: FontWeight.bold)),
         backgroundColor: Theme.of(context).colorScheme.primary,
         foregroundColor: Colors.white,
       ),
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              Colors.deepPurple.withOpacity(0.1),
-              Colors.white,
-            ],
-          ),
-        ),
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              ElevatedButton(
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => MyHomePage(title: 'Face Attendance'),
+      body: _isLoadingTimetable
+          ? const Center(child: CircularProgressIndicator())
+          : Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [Colors.deepPurple.withOpacity(0.1), Colors.white],
+                ),
+              ),
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    ElevatedButton(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (context) => MyHomePage(title: 'Face Attendance')),
+                        );
+                      },
+                      style: ElevatedButton.styleFrom(
+                        minimumSize: const Size(220, 60),
+                        backgroundColor: Colors.deepPurple,
+                        foregroundColor: Colors.white,
+                        elevation: 8,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                      ),
+                      child: const Text('Register', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                     ),
-                  );
-                },
-                style: ElevatedButton.styleFrom(
-                  minimumSize: const Size(220, 60),
-                  backgroundColor: Colors.deepPurple,
-                  foregroundColor: Colors.white,
-                  elevation: 8,
-                  shadowColor: Colors.deepPurple.withOpacity(0.5),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                ),
-                child: const Text(
-                  'Register',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                ),
-              ),
-              const SizedBox(height: 24),
-              ElevatedButton(
-                onPressed: _navigateToCompareScreen,
-                style: ElevatedButton.styleFrom(
-                  minimumSize: const Size(220, 60),
-                  backgroundColor: Colors.deepPurple,
-                  foregroundColor: Colors.white,
-                  elevation: 8,
-                  shadowColor: Colors.deepPurple.withOpacity(0.5),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                ),
-                child: const Text(
-                  'Compare (Manual)',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    const SizedBox(height: 24),
+                    ElevatedButton(
+                      onPressed: _navigateToCompareScreen,
+                      style: ElevatedButton.styleFrom(
+                        minimumSize: const Size(220, 60),
+                        backgroundColor: Colors.deepPurple,
+                        foregroundColor: Colors.white,
+                        elevation: 8,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                      ),
+                      child: const Text('Compare (Manual)', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    ),
+                    const SizedBox(height: 24),
+                    const Text(
+                      'Tap an NFC sticker to mark attendance',
+                      style: TextStyle(fontSize: 16, fontStyle: FontStyle.italic, color: Colors.deepPurple, fontWeight: FontWeight.w500),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 24),
-              const Text(
-                'Tap an NFC sticker to mark attendance',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontStyle: FontStyle.italic,
-                  color: Colors.deepPurple,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+            ),
     );
   }
 
@@ -295,9 +375,7 @@ class _MyHomePageState extends State<MyHomePage> {
   Future<void> _navigateToCameraScreen() async {
     final result = await Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (context) => CameraScreen(isCompareMode: false),
-      ),
+      MaterialPageRoute(builder: (context) => CameraScreen(isCompareMode: false)),
     );
 
     if (result != null && result is List<double>) {
@@ -344,10 +422,7 @@ class _MyHomePageState extends State<MyHomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          widget.title,
-          style: const TextStyle(fontWeight: FontWeight.bold),
-        ),
+        title: Text(widget.title, style: const TextStyle(fontWeight: FontWeight.bold)),
         backgroundColor: Theme.of(context).colorScheme.primary,
         foregroundColor: Colors.white,
       ),
@@ -356,10 +431,7 @@ class _MyHomePageState extends State<MyHomePage> {
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [
-              Colors.deepPurple.withOpacity(0.1),
-              Colors.white,
-            ],
+            colors: [Colors.deepPurple.withOpacity(0.1), Colors.white],
           ),
         ),
         child: SingleChildScrollView(
@@ -388,9 +460,7 @@ class _MyHomePageState extends State<MyHomePage> {
                         controller: _usernameController,
                         decoration: InputDecoration(
                           labelText: 'Username',
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                           filled: true,
                           fillColor: Colors.grey[100],
                           contentPadding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 16.0),
@@ -401,9 +471,7 @@ class _MyHomePageState extends State<MyHomePage> {
                         controller: _rollNoController,
                         decoration: InputDecoration(
                           labelText: 'Roll Number',
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                           filled: true,
                           fillColor: Colors.grey[100],
                           contentPadding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 16.0),
@@ -415,9 +483,7 @@ class _MyHomePageState extends State<MyHomePage> {
                         controller: _classController,
                         decoration: InputDecoration(
                           labelText: 'Class',
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                           filled: true,
                           fillColor: Colors.grey[100],
                           contentPadding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 16.0),
@@ -446,16 +512,10 @@ class _MyHomePageState extends State<MyHomePage> {
                           backgroundColor: Colors.deepPurple,
                           foregroundColor: Colors.white,
                           elevation: 8,
-                          shadowColor: Colors.deepPurple.withOpacity(0.5),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                           padding: const EdgeInsets.symmetric(vertical: 16),
                         ),
-                        child: const Text(
-                          'Submit',
-                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                        ),
+                        child: const Text('Submit', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                       ),
                     ],
                   ),
@@ -464,11 +524,7 @@ class _MyHomePageState extends State<MyHomePage> {
               const SizedBox(height: 24),
               const Text(
                 'Registered Students',
-                style: TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.deepPurple,
-                ),
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.deepPurple),
               ),
               ListView.builder(
                 shrinkWrap: true,
@@ -481,10 +537,7 @@ class _MyHomePageState extends State<MyHomePage> {
                     elevation: 4,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     child: ListTile(
-                      title: Text(
-                        student['username'] ?? '',
-                        style: const TextStyle(fontWeight: FontWeight.w600),
-                      ),
+                      title: Text(student['username'] ?? '', style: const TextStyle(fontWeight: FontWeight.w600)),
                       subtitle: Text(
                         'Roll No: ${student['rollNo']} | Class: ${student['class']}',
                         style: TextStyle(color: Colors.grey[700]),
@@ -642,10 +695,7 @@ class _CameraScreenState extends State<CameraScreen> {
       1,
       List<List<List<double>>>.filled(
         160,
-        List<List<double>>.filled(
-          160,
-          List<double>.filled(3, 0),
-        ),
+        List<List<double>>.filled(160, List<double>.filled(3, 0)),
       ),
     );
 
@@ -678,7 +728,7 @@ class _CameraScreenState extends State<CameraScreen> {
     print('Comparing embedding with Firestore');
     print('New embedding sample: ${newEmbedding.sublist(0, 5)}...');
     final QuerySnapshot snapshot = await _firestore.collection('students').get();
-    const double threshold = 1.0;
+    const double threshold = 0.6;
     Map<String, dynamic>? bestMatch;
     double minDistance = double.infinity;
 
@@ -813,10 +863,7 @@ class _CameraScreenState extends State<CameraScreen> {
                           backgroundColor: Colors.deepPurple,
                           foregroundColor: Colors.white,
                           elevation: 8,
-                          shadowColor: Colors.deepPurple.withOpacity(0.5),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
                         ),
                       ),
