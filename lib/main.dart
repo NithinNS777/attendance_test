@@ -18,7 +18,6 @@ void main() async {
   await Firebase.initializeApp();
   await Permission.camera.request();
   await Permission.storage.request();
-  // NFC permission is handled by AndroidManifest.xml; no Permission.nfc.request() needed
   runApp(MyApp());
 }
 
@@ -28,8 +27,16 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'Face Attendance',
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: Colors.deepPurple,
+          brightness: Brightness.light,
+        ),
         useMaterial3: true,
+        scaffoldBackgroundColor: Colors.grey[100],
+        appBarTheme: AppBarTheme(
+          elevation: 4,
+          shadowColor: Colors.deepPurple.withOpacity(0.3),
+        ),
       ),
       home: InitialScreen(),
     );
@@ -50,7 +57,7 @@ class _InitialScreenState extends State<InitialScreen> {
 
   Future<void> _startNfcListening() async {
     bool isNfcAvailable = await NfcManager.instance.isAvailable();
-    print('NFC Availability Check: $isNfcAvailable'); // Debug log
+    print('NFC Availability Check: $isNfcAvailable');
     if (!isNfcAvailable) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -62,34 +69,63 @@ class _InitialScreenState extends State<InitialScreen> {
     }
 
     NfcManager.instance.startSession(onDiscovered: (NfcTag tag) async {
-      print('NFC Tag Detected'); // Debug log
-      final result = await Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => CameraScreen(isCompareMode: true),
-        ),
-      );
+      print('NFC Tag Detected');
+      // Get the NFC UID
+      var identifier = tag.data['nfca']['identifier'];
+      String nfcId = identifier
+          .map((e) => e.toRadixString(16).padLeft(2, '0'))
+          .join(':')
+          .toUpperCase(); // Ensure consistent formatting
+      print('Scanned NFC ID: $nfcId');
 
-      if (result != null && result is Map<String, dynamic>) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-                'Attendance marked for ${result['username']} (Roll No: ${result['rollNo']})'),
-            backgroundColor: Colors.green,
-            duration: Duration(seconds: 3),
+      // Define the target NFC UID
+      const String targetNfcId = '53:1E:97:86:12:00:01';
+
+      // Only proceed if the scanned NFC ID matches the target
+      if (nfcId == targetNfcId) {
+        print('Target NFC ID matched: $targetNfcId');
+        final result = await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => CameraScreen(isCompareMode: true),
           ),
         );
+
+        if (result != null && result is Map<String, dynamic>) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Attendance marked for ${result['username']} (Roll No: ${result['rollNo']})',
+                style: const TextStyle(color: Colors.white),
+              ),
+              backgroundColor: Colors.green,
+              elevation: 6,
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('No match found', style: TextStyle(color: Colors.white)),
+              backgroundColor: Colors.red,
+              elevation: 6,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
       } else {
+        print('NFC ID $nfcId does not match target $targetNfcId');
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('No match found'),
-            backgroundColor: Colors.red,
+          SnackBar(
+            content: Text('Unrecognized NFC tag: $nfcId'),
+            backgroundColor: Colors.orange,
           ),
         );
       }
 
       NfcManager.instance.stopSession();
-      _startNfcListening(); // Restart listening
+      _startNfcListening(); // Restart listening for the next tap
     });
   }
 
@@ -105,16 +141,22 @@ class _InitialScreenState extends State<InitialScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-              'Attendance marked for ${result['username']} (Roll No: ${result['rollNo']})'),
+            'Attendance marked for ${result['username']} (Roll No: ${result['rollNo']})',
+            style: const TextStyle(color: Colors.white),
+          ),
           backgroundColor: Colors.green,
-          duration: Duration(seconds: 3),
+          elevation: 6,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 3),
         ),
       );
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('No match found'),
+          content: Text('No match found', style: TextStyle(color: Colors.white)),
           backgroundColor: Colors.red,
+          elevation: 6,
+          behavior: SnackBarBehavior.floating,
         ),
       );
     }
@@ -124,41 +166,84 @@ class _InitialScreenState extends State<InitialScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Face Attendance'),
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        title: const Text(
+          'Face Attendance',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        backgroundColor: Theme.of(context).colorScheme.primary,
+        foregroundColor: Colors.white,
       ),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            ElevatedButton(
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => MyHomePage(title: 'Face Attendance'),
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Colors.deepPurple.withOpacity(0.1),
+              Colors.white,
+            ],
+          ),
+        ),
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => MyHomePage(title: 'Face Attendance'),
+                    ),
+                  );
+                },
+                style: ElevatedButton.styleFrom(
+                  minimumSize: const Size(220, 60),
+                  backgroundColor: Colors.deepPurple,
+                  foregroundColor: Colors.white,
+                  elevation: 8,
+                  shadowColor: Colors.deepPurple.withOpacity(0.5),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                );
-              },
-              child: const Text('Register'),
-              style: ElevatedButton.styleFrom(
-                minimumSize: const Size(200, 50),
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                ),
+                child: const Text(
+                  'Register',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
               ),
-            ),
-            const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: _navigateToCompareScreen,
-              child: const Text('Compare (Manual)'),
-              style: ElevatedButton.styleFrom(
-                minimumSize: const Size(200, 50),
+              const SizedBox(height: 24),
+              ElevatedButton(
+                onPressed: _navigateToCompareScreen,
+                style: ElevatedButton.styleFrom(
+                  minimumSize: const Size(220, 60),
+                  backgroundColor: Colors.deepPurple,
+                  foregroundColor: Colors.white,
+                  elevation: 8,
+                  shadowColor: Colors.deepPurple.withOpacity(0.5),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                ),
+                child: const Text(
+                  'Compare (Manual)',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
               ),
-            ),
-            const SizedBox(height: 20),
-            const Text(
-              'Tap an NFC sticker to mark attendance',
-              style: TextStyle(fontSize: 16, fontStyle: FontStyle.italic),
-            ),
-          ],
+              const SizedBox(height: 24),
+              const Text(
+                'Tap an NFC sticker to mark attendance',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontStyle: FontStyle.italic,
+                  color: Colors.deepPurple,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -236,16 +321,20 @@ class _MyHomePageState extends State<MyHomePage> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Face data stored successfully!'),
+          content: Text('Face data stored successfully!', style: TextStyle(color: Colors.white)),
           backgroundColor: Colors.green,
+          elevation: 6,
+          behavior: SnackBarBehavior.floating,
         ),
       );
       _fetchStudents();
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Error submitting data: $e'),
+          content: Text('Error submitting data: $e', style: const TextStyle(color: Colors.white)),
           backgroundColor: Colors.red,
+          elevation: 6,
+          behavior: SnackBarBehavior.floating,
         ),
       );
     }
@@ -255,86 +344,157 @@ class _MyHomePageState extends State<MyHomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        title: Text(widget.title),
+        title: Text(
+          widget.title,
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+        backgroundColor: Theme.of(context).colorScheme.primary,
+        foregroundColor: Colors.white,
       ),
-      body: SingleChildScrollView(
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 32.0),
-              child: Container(
-                constraints: const BoxConstraints(maxWidth: 300),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    TextField(
-                      controller: _usernameController,
-                      decoration: const InputDecoration(
-                        labelText: 'Username',
-                        border: UnderlineInputBorder(),
-                        contentPadding: EdgeInsets.symmetric(vertical: 8.0),
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Colors.deepPurple.withOpacity(0.1),
+              Colors.white,
+            ],
+          ),
+        ),
+        child: SingleChildScrollView(
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 32.0, vertical: 20.0),
+                child: Container(
+                  constraints: const BoxConstraints(maxWidth: 400),
+                  padding: const EdgeInsets.all(16.0),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.deepPurple.withOpacity(0.2),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
                       ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: _rollNoController,
-                      decoration: const InputDecoration(
-                        labelText: 'Roll Number',
-                        border: UnderlineInputBorder(),
-                        contentPadding: EdgeInsets.symmetric(vertical: 8.0),
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      TextField(
+                        controller: _usernameController,
+                        decoration: InputDecoration(
+                          labelText: 'Username',
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          filled: true,
+                          fillColor: Colors.grey[100],
+                          contentPadding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 16.0),
+                        ),
                       ),
-                      keyboardType: TextInputType.number,
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: _classController,
-                      decoration: const InputDecoration(
-                        labelText: 'Class',
-                        border: UnderlineInputBorder(),
-                        contentPadding: EdgeInsets.symmetric(vertical: 8.0),
+                      const SizedBox(height: 16),
+                      TextField(
+                        controller: _rollNoController,
+                        decoration: InputDecoration(
+                          labelText: 'Roll Number',
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          filled: true,
+                          fillColor: Colors.grey[100],
+                          contentPadding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 16.0),
+                        ),
+                        keyboardType: TextInputType.number,
                       ),
-                    ),
-                    const SizedBox(height: 24),
-                    ElevatedButton(
-                      onPressed: () {
-                        if (_usernameController.text.isNotEmpty &&
-                            _rollNoController.text.isNotEmpty &&
-                            _classController.text.isNotEmpty) {
-                          _navigateToCameraScreen();
-                        } else {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Please fill all fields'),
-                              backgroundColor: Colors.red,
-                            ),
-                          );
-                        }
-                      },
-                      child: const Text('Submit'),
-                    ),
-                  ],
+                      const SizedBox(height: 16),
+                      TextField(
+                        controller: _classController,
+                        decoration: InputDecoration(
+                          labelText: 'Class',
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          filled: true,
+                          fillColor: Colors.grey[100],
+                          contentPadding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 16.0),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      ElevatedButton(
+                        onPressed: () {
+                          if (_usernameController.text.isNotEmpty &&
+                              _rollNoController.text.isNotEmpty &&
+                              _classController.text.isNotEmpty) {
+                            _navigateToCameraScreen();
+                          } else {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Please fill all fields', style: TextStyle(color: Colors.white)),
+                                backgroundColor: Colors.red,
+                                elevation: 6,
+                                behavior: SnackBarBehavior.floating,
+                              ),
+                            );
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(
+                          minimumSize: const Size(200, 60),
+                          backgroundColor: Colors.deepPurple,
+                          foregroundColor: Colors.white,
+                          elevation: 8,
+                          shadowColor: Colors.deepPurple.withOpacity(0.5),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                        ),
+                        child: const Text(
+                          'Submit',
+                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 24),
-            const Text(
-              'Registered Students',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-            ListView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: students.length,
-              itemBuilder: (context, index) {
-                final student = students[index];
-                return ListTile(
-                  title: Text(student['username'] ?? ''),
-                  subtitle: Text('Roll No: ${student['rollNo']} | Class: ${student['class']}'),
-                );
-              },
-            ),
-          ],
+              const SizedBox(height: 24),
+              const Text(
+                'Registered Students',
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.deepPurple,
+                ),
+              ),
+              ListView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: students.length,
+                itemBuilder: (context, index) {
+                  final student = students[index];
+                  return Card(
+                    margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    elevation: 4,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    child: ListTile(
+                      title: Text(
+                        student['username'] ?? '',
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      subtitle: Text(
+                        'Roll No: ${student['rollNo']} | Class: ${student['class']}',
+                        style: TextStyle(color: Colors.grey[700]),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -398,8 +558,10 @@ class _CameraScreenState extends State<CameraScreen> {
       if (status.isDenied) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Camera permission is required'),
+            content: Text('Camera permission is required', style: TextStyle(color: Colors.white)),
             backgroundColor: Colors.red,
+            elevation: 6,
+            behavior: SnackBarBehavior.floating,
           ),
         );
         return;
@@ -409,8 +571,10 @@ class _CameraScreenState extends State<CameraScreen> {
       if (cameras.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('No cameras found'),
+            content: Text('No cameras found', style: TextStyle(color: Colors.white)),
             backgroundColor: Colors.red,
+            elevation: 6,
+            behavior: SnackBarBehavior.floating,
           ),
         );
         return;
@@ -437,7 +601,7 @@ class _CameraScreenState extends State<CameraScreen> {
       });
 
       if (widget.isCompareMode) {
-        Future.delayed(Duration(seconds: 1), () {
+        Future.delayed(const Duration(seconds: 1), () {
           if (mounted) _captureAndAnalyze();
         });
       }
@@ -446,8 +610,10 @@ class _CameraScreenState extends State<CameraScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error initializing camera: $e'),
+            content: Text('Error initializing camera: $e', style: const TextStyle(color: Colors.white)),
             backgroundColor: Colors.red,
+            elevation: 6,
+            behavior: SnackBarBehavior.floating,
           ),
         );
       }
@@ -570,8 +736,10 @@ class _CameraScreenState extends State<CameraScreen> {
           if (widget.isCompareMode) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                content: Text('Scanning...'),
+                content: Text('Scanning...', style: TextStyle(color: Colors.white)),
                 backgroundColor: Colors.blue,
+                elevation: 6,
+                behavior: SnackBarBehavior.floating,
                 duration: Duration(seconds: 2),
               ),
             );
@@ -589,16 +757,20 @@ class _CameraScreenState extends State<CameraScreen> {
       print('No face detected in captured photo after trying all rotations');
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('No face detected. Please try again.'),
+          content: Text('No face detected. Please try again.', style: TextStyle(color: Colors.white)),
           backgroundColor: Colors.red,
+          elevation: 6,
+          behavior: SnackBarBehavior.floating,
         ),
       );
     } catch (e) {
       print('Error in face detection: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Error: $e'),
+          content: Text('Error: $e', style: const TextStyle(color: Colors.white)),
           backgroundColor: Colors.red,
+          elevation: 6,
+          behavior: SnackBarBehavior.floating,
         ),
       );
     } finally {
@@ -611,30 +783,52 @@ class _CameraScreenState extends State<CameraScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(widget.isCompareMode ? 'Compare Face' : 'Register Face')),
+      appBar: AppBar(
+        title: Text(
+          widget.isCompareMode ? 'Compare Face' : 'Register Face',
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+        backgroundColor: Theme.of(context).colorScheme.primary,
+        foregroundColor: Colors.white,
+      ),
       body: _isCameraInitialized
           ? Stack(
               children: [
                 CameraPreview(_cameraController),
                 if (!widget.isCompareMode)
                   Positioned(
-                    bottom: 20,
+                    bottom: 30,
                     left: 0,
                     right: 0,
                     child: Center(
                       child: ElevatedButton.icon(
                         onPressed: _isProcessing ? null : _captureAndAnalyze,
-                        icon: const Icon(Icons.camera),
-                        label: Text(_isProcessing ? 'Processing...' : 'Submit'),
+                        icon: const Icon(Icons.camera_alt, size: 28),
+                        label: Text(
+                          _isProcessing ? 'Processing...' : 'Submit',
+                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                        ),
                         style: ElevatedButton.styleFrom(
-                          minimumSize: const Size(200, 50),
+                          minimumSize: const Size(220, 60),
+                          backgroundColor: Colors.deepPurple,
+                          foregroundColor: Colors.white,
+                          elevation: 8,
+                          shadowColor: Colors.deepPurple.withOpacity(0.5),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
                         ),
                       ),
                     ),
                   ),
               ],
             )
-          : const Center(child: CircularProgressIndicator()),
+          : const Center(
+              child: CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.deepPurple),
+              ),
+            ),
     );
   }
 
