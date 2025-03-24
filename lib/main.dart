@@ -72,7 +72,7 @@ class _InitialScreenState extends State<InitialScreen> {
       if (_timetable.isEmpty) {
         print('Warning: Timetable is empty!');
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Timetable is empty. Check Firestore setup.')),
+          const SnackBar(content: Text('Timetable is empty. Check Firestore setup.', style: TextStyle(fontSize: 18))),
         );
       }
     } catch (e) {
@@ -81,7 +81,7 @@ class _InitialScreenState extends State<InitialScreen> {
         _isLoadingTimetable = false;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error fetching timetable: $e')),
+        SnackBar(content: Text('Error fetching timetable: $e', style: const TextStyle(fontSize: 18))),
       );
     }
   }
@@ -131,7 +131,6 @@ class _InitialScreenState extends State<InitialScreen> {
 
   Future<void> _markAttendance(String nfcId, String subject, Map<String, dynamic> studentData) async {
     try {
-      // Check if attendance is already marked for this subject and roll number
       bool alreadyMarked = await _isAttendanceMarked(studentData['rollNo'], subject);
       if (alreadyMarked) {
         print('Attendance already marked for ${studentData['username']} in $subject');
@@ -139,7 +138,7 @@ class _InitialScreenState extends State<InitialScreen> {
           SnackBar(
             content: Text(
               'Attendance already marked for ${studentData['username']} in $subject',
-              style: const TextStyle(color: Colors.white),
+              style: const TextStyle(color: Colors.white, fontSize: 18),
             ),
             backgroundColor: Colors.orange,
             elevation: 6,
@@ -164,7 +163,7 @@ class _InitialScreenState extends State<InitialScreen> {
         SnackBar(
           content: Text(
             'Attendance marked for ${studentData['username']} (Roll No: ${studentData['rollNo']}) in $subject',
-            style: const TextStyle(color: Colors.white),
+            style: const TextStyle(color: Colors.white, fontSize: 18),
           ),
           backgroundColor: Colors.green,
           elevation: 6,
@@ -175,7 +174,9 @@ class _InitialScreenState extends State<InitialScreen> {
     } catch (e) {
       print('Error marking attendance: $e');
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error marking attendance: $e')),
+        SnackBar(
+          content: Text('Error marking attendance: $e', style: const TextStyle(fontSize: 18)),
+        ),
       );
     }
   }
@@ -185,7 +186,10 @@ class _InitialScreenState extends State<InitialScreen> {
     print('NFC Availability: $isNfcAvailable');
     if (!isNfcAvailable) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('NFC is not available or enabled'), backgroundColor: Colors.red),
+        const SnackBar(
+          content: Text('NFC is not available or enabled', style: TextStyle(fontSize: 18)),
+          backgroundColor: Colors.red,
+        ),
       );
       return;
     }
@@ -206,7 +210,10 @@ class _InitialScreenState extends State<InitialScreen> {
 
         if (currentSubject == null) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('No class scheduled at this time'), backgroundColor: Colors.orange),
+            const SnackBar(
+              content: Text('No class scheduled at this time', style: TextStyle(fontSize: 18)),
+              backgroundColor: Colors.orange,
+            ),
           );
           NfcManager.instance.stopSession();
           _startNfcListening();
@@ -223,7 +230,7 @@ class _InitialScreenState extends State<InitialScreen> {
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('No match found', style: TextStyle(color: Colors.white)),
+              content: Text('No match found', style: TextStyle(color: Colors.white, fontSize: 18)),
               backgroundColor: Colors.red,
               elevation: 6,
               behavior: SnackBarBehavior.floating,
@@ -233,7 +240,10 @@ class _InitialScreenState extends State<InitialScreen> {
       } else {
         print('NFC ID mismatch: $nfcId != $targetNfcId');
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Unrecognized NFC tag: $nfcId'), backgroundColor: Colors.orange),
+          SnackBar(
+            content: Text('Unrecognized NFC tag: $nfcId', style: const TextStyle(fontSize: 18)),
+            backgroundColor: Colors.orange,
+          ),
         );
       }
 
@@ -346,7 +356,7 @@ class _MyHomePageState extends State<MyHomePage> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Face data stored successfully!', style: TextStyle(color: Colors.white)),
+          content: Text('Face data stored successfully!', style: TextStyle(color: Colors.white, fontSize: 18)),
           backgroundColor: Colors.green,
           elevation: 6,
           behavior: SnackBarBehavior.floating,
@@ -355,7 +365,7 @@ class _MyHomePageState extends State<MyHomePage> {
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Error submitting data: $e', style: const TextStyle(color: Colors.white)),
+          content: Text('Error submitting data: $e', style: const TextStyle(color: Colors.white, fontSize: 18)),
           backgroundColor: Colors.red,
           elevation: 6,
           behavior: SnackBarBehavior.floating,
@@ -380,94 +390,92 @@ class _MyHomePageState extends State<MyHomePage> {
             colors: [Colors.deepPurple.withOpacity(0.1), Colors.white],
           ),
         ),
-        child: SingleChildScrollView(
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 32.0, vertical: 20.0),
-                child: Container(
-                  constraints: const BoxConstraints(maxWidth: 400),
-                  padding: const EdgeInsets.all(16.0),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.deepPurple.withOpacity(0.2),
-                        blurRadius: 10,
-                        offset: const Offset(0, 4),
+        child: Center(
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 32.0),
+              child: Container(
+                constraints: const BoxConstraints(maxWidth: 400),
+                padding: const EdgeInsets.all(16.0),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.deepPurple.withOpacity(0.2),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    TextField(
+                      controller: _usernameController,
+                      decoration: InputDecoration(
+                        labelText: 'Username',
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        filled: true,
+                        fillColor: Colors.grey[100],
+                        contentPadding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 16.0),
                       ),
-                    ],
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      TextField(
-                        controller: _usernameController,
-                        decoration: InputDecoration(
-                          labelText: 'Username',
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                          filled: true,
-                          fillColor: Colors.grey[100],
-                          contentPadding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 16.0),
-                        ),
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: _rollNoController,
+                      decoration: InputDecoration(
+                        labelText: 'Roll Number',
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        filled: true,
+                        fillColor: Colors.grey[100],
+                        contentPadding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 16.0),
                       ),
-                      const SizedBox(height: 16),
-                      TextField(
-                        controller: _rollNoController,
-                        decoration: InputDecoration(
-                          labelText: 'Roll Number',
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                          filled: true,
-                          fillColor: Colors.grey[100],
-                          contentPadding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 16.0),
-                        ),
-                        keyboardType: TextInputType.number,
+                      keyboardType: TextInputType.number,
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: _classController,
+                      decoration: InputDecoration(
+                        labelText: 'Class',
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        filled: true,
+                        fillColor: Colors.grey[100],
+                        contentPadding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 16.0),
                       ),
-                      const SizedBox(height: 16),
-                      TextField(
-                        controller: _classController,
-                        decoration: InputDecoration(
-                          labelText: 'Class',
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                          filled: true,
-                          fillColor: Colors.grey[100],
-                          contentPadding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 16.0),
-                        ),
+                    ),
+                    const SizedBox(height: 24),
+                    ElevatedButton(
+                      onPressed: () {
+                        if (_usernameController.text.isNotEmpty &&
+                            _rollNoController.text.isNotEmpty &&
+                            _classController.text.isNotEmpty) {
+                          _navigateToCameraScreen();
+                        } else {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Please fill all fields', style: TextStyle(color: Colors.white, fontSize: 18)),
+                              backgroundColor: Colors.red,
+                              elevation: 6,
+                              behavior: SnackBarBehavior.floating,
+                            ),
+                          );
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(
+                        minimumSize: const Size(200, 60),
+                        backgroundColor: Colors.deepPurple,
+                        foregroundColor: Colors.white,
+                        elevation: 8,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        padding: const EdgeInsets.symmetric(vertical: 16),
                       ),
-                      const SizedBox(height: 24),
-                      ElevatedButton(
-                        onPressed: () {
-                          if (_usernameController.text.isNotEmpty &&
-                              _rollNoController.text.isNotEmpty &&
-                              _classController.text.isNotEmpty) {
-                            _navigateToCameraScreen();
-                          } else {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Please fill all fields', style: TextStyle(color: Colors.white)),
-                                backgroundColor: Colors.red,
-                                elevation: 6,
-                                behavior: SnackBarBehavior.floating,
-                              ),
-                            );
-                          }
-                        },
-                        style: ElevatedButton.styleFrom(
-                          minimumSize: const Size(200, 60),
-                          backgroundColor: Colors.deepPurple,
-                          foregroundColor: Colors.white,
-                          elevation: 8,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                        ),
-                        child: const Text('Submit', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                      ),
-                    ],
-                  ),
+                      child: const Text('Submit', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    ),
+                  ],
                 ),
               ),
-            ],
+            ),
           ),
         ),
       ),
@@ -532,7 +540,7 @@ class _CameraScreenState extends State<CameraScreen> {
       if (status.isDenied) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Camera permission is required', style: TextStyle(color: Colors.white)),
+            content: Text('Camera permission is required', style: TextStyle(color: Colors.white, fontSize: 18)),
             backgroundColor: Colors.red,
             elevation: 6,
             behavior: SnackBarBehavior.floating,
@@ -545,7 +553,7 @@ class _CameraScreenState extends State<CameraScreen> {
       if (cameras.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('No cameras found', style: TextStyle(color: Colors.white)),
+            content: Text('No cameras found', style: TextStyle(color: Colors.white, fontSize: 18)),
             backgroundColor: Colors.red,
             elevation: 6,
             behavior: SnackBarBehavior.floating,
@@ -584,7 +592,7 @@ class _CameraScreenState extends State<CameraScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error initializing camera: $e', style: const TextStyle(color: Colors.white)),
+            content: Text('Error initializing camera: $e', style: const TextStyle(color: Colors.white, fontSize: 18)),
             backgroundColor: Colors.red,
             elevation: 6,
             behavior: SnackBarBehavior.floating,
@@ -739,7 +747,7 @@ class _CameraScreenState extends State<CameraScreen> {
           if (widget.isCompareMode) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                content: Text('Scanning...', style: TextStyle(color: Colors.white)),
+                content: Text('Scanning...', style: TextStyle(color: Colors.white, fontSize: 18)),
                 backgroundColor: Colors.blue,
                 elevation: 6,
                 behavior: SnackBarBehavior.floating,
@@ -760,7 +768,7 @@ class _CameraScreenState extends State<CameraScreen> {
       print('No face detected in captured photo after trying all rotations');
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('No face detected. Please try again.', style: TextStyle(color: Colors.white)),
+          content: Text('No face detected. Please try again.', style: TextStyle(color: Colors.white, fontSize: 18)),
           backgroundColor: Colors.red,
           elevation: 6,
           behavior: SnackBarBehavior.floating,
@@ -770,7 +778,7 @@ class _CameraScreenState extends State<CameraScreen> {
       print('Error in face detection: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Error: $e', style: const TextStyle(color: Colors.white)),
+          content: Text('Error: $e', style: const TextStyle(color: Colors.white, fontSize: 18)),
           backgroundColor: Colors.red,
           elevation: 6,
           behavior: SnackBarBehavior.floating,
