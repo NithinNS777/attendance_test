@@ -117,7 +117,7 @@ class _InitialScreenState extends State<InitialScreen> {
     try {
       final snapshot = await _firestore
           .collection('attendance')
-          .where('rollNo', isEqualTo: rollNo) // Changed from nfcId to rollNo
+          .where('rollNo', isEqualTo: rollNo)
           .where('subject', isEqualTo: subject)
           .where('date', isEqualTo: DateTime.now().toIso8601String().substring(0, 10))
           .get();
@@ -131,6 +131,25 @@ class _InitialScreenState extends State<InitialScreen> {
 
   Future<void> _markAttendance(String nfcId, String subject, Map<String, dynamic> studentData) async {
     try {
+      // Check if attendance is already marked for this subject and roll number
+      bool alreadyMarked = await _isAttendanceMarked(studentData['rollNo'], subject);
+      if (alreadyMarked) {
+        print('Attendance already marked for ${studentData['username']} in $subject');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Attendance already marked for ${studentData['username']} in $subject',
+              style: const TextStyle(color: Colors.white),
+            ),
+            backgroundColor: Colors.orange,
+            elevation: 6,
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+        return;
+      }
+
       print('Attempting to mark attendance for ${studentData['username']} in $subject with NFC ID: $nfcId');
       await _firestore.collection('attendance').add({
         'nfcId': nfcId,
@@ -141,6 +160,18 @@ class _InitialScreenState extends State<InitialScreen> {
         'rollNo': studentData['rollNo'],
       });
       print('Attendance successfully marked in Firestore for ${studentData['username']}');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Attendance marked for ${studentData['username']} (Roll No: ${studentData['rollNo']}) in $subject',
+            style: const TextStyle(color: Colors.white),
+          ),
+          backgroundColor: Colors.green,
+          elevation: 6,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 3),
+        ),
+      );
     } catch (e) {
       print('Error marking attendance: $e');
       ScaffoldMessenger.of(context).showSnackBar(
@@ -188,29 +219,7 @@ class _InitialScreenState extends State<InitialScreen> {
         );
 
         if (result != null && result is Map<String, dynamic>) {
-          bool alreadyMarked = await _isAttendanceMarked(result['rollNo'], currentSubject);
-          if (alreadyMarked) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Attendance already marked for $currentSubject today for ${result['username']}'), backgroundColor: Colors.orange),
-            );
-            NfcManager.instance.stopSession();
-            _startNfcListening();
-            return;
-          }
-
           await _markAttendance(nfcId, currentSubject, result);
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                'Attendance marked for ${result['username']} (Roll No: ${result['rollNo']}) in $currentSubject',
-                style: const TextStyle(color: Colors.white),
-              ),
-              backgroundColor: Colors.green,
-              elevation: 6,
-              behavior: SnackBarBehavior.floating,
-              duration: const Duration(seconds: 3),
-            ),
-          );
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -231,38 +240,6 @@ class _InitialScreenState extends State<InitialScreen> {
       NfcManager.instance.stopSession();
       _startNfcListening();
     });
-  }
-
-  Future<void> _navigateToCompareScreen() async {
-    final result = await Navigator.push(
-      context,
-      MaterialPageRoute(builder: (context) => CameraScreen(isCompareMode: true)),
-    );
-
-    if (result != null && result is Map<String, dynamic>) {
-      await _markAttendance('manual_test_nfc', 'ManualTest', result);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Attendance marked for ${result['username']} (Roll No: ${result['rollNo']})',
-            style: const TextStyle(color: Colors.white),
-          ),
-          backgroundColor: Colors.green,
-          elevation: 6,
-          behavior: SnackBarBehavior.floating,
-          duration: const Duration(seconds: 3),
-        ),
-      );
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No match found', style: TextStyle(color: Colors.white)),
-          backgroundColor: Colors.red,
-          elevation: 6,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    }
   }
 
   @override
@@ -305,19 +282,6 @@ class _InitialScreenState extends State<InitialScreen> {
                       child: const Text('Register', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                     ),
                     const SizedBox(height: 24),
-                    ElevatedButton(
-                      onPressed: _navigateToCompareScreen,
-                      style: ElevatedButton.styleFrom(
-                        minimumSize: const Size(220, 60),
-                        backgroundColor: Colors.deepPurple,
-                        foregroundColor: Colors.white,
-                        elevation: 8,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                      ),
-                      child: const Text('Compare (Manual)', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                    ),
-                    const SizedBox(height: 24),
                     const Text(
                       'Tap an NFC sticker to mark attendance',
                       style: TextStyle(fontSize: 16, fontStyle: FontStyle.italic, color: Colors.deepPurple, fontWeight: FontWeight.w500),
@@ -349,27 +313,10 @@ class _MyHomePageState extends State<MyHomePage> {
   final TextEditingController _rollNoController = TextEditingController();
   final TextEditingController _classController = TextEditingController();
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  List<Map<String, dynamic>> students = [];
 
   @override
   void initState() {
     super.initState();
-    _fetchStudents();
-  }
-
-  Future<void> _fetchStudents() async {
-    try {
-      final QuerySnapshot snapshot = await _firestore.collection('students').get();
-      setState(() {
-        students = snapshot.docs.map((doc) => doc.data() as Map<String, dynamic>).toList();
-      });
-      print('Registered students in Firestore:');
-      for (var student in students) {
-        print('Username: ${student['username']}, Embedding sample: ${student['faceEmbedding'].sublist(0, 5)}...');
-      }
-    } catch (e) {
-      print('Error fetching students: $e');
-    }
   }
 
   Future<void> _navigateToCameraScreen() async {
@@ -405,7 +352,6 @@ class _MyHomePageState extends State<MyHomePage> {
           behavior: SnackBarBehavior.floating,
         ),
       );
-      _fetchStudents();
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -520,31 +466,6 @@ class _MyHomePageState extends State<MyHomePage> {
                     ],
                   ),
                 ),
-              ),
-              const SizedBox(height: 24),
-              const Text(
-                'Registered Students',
-                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.deepPurple),
-              ),
-              ListView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: students.length,
-                itemBuilder: (context, index) {
-                  final student = students[index];
-                  return Card(
-                    margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    elevation: 4,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    child: ListTile(
-                      title: Text(student['username'] ?? '', style: const TextStyle(fontWeight: FontWeight.w600)),
-                      subtitle: Text(
-                        'Roll No: ${student['rollNo']} | Class: ${student['class']}',
-                        style: TextStyle(color: Colors.grey[700]),
-                      ),
-                    ),
-                  );
-                },
               ),
             ],
           ),
@@ -673,6 +594,21 @@ class _CameraScreenState extends State<CameraScreen> {
     }
   }
 
+  List<double> normalizeEmbedding(List<double> embedding) {
+    double norm = sqrt(embedding.fold(0.0, (sum, e) => sum + e * e));
+    if (norm == 0) return embedding;
+    return embedding.map((e) => e / norm).toList();
+  }
+
+  double cosineSimilarity(List<double> v1, List<double> v2) {
+    if (v1.length != v2.length) return 0.0;
+    double dotProduct = 0.0;
+    for (int i = 0; i < v1.length; i++) {
+      dotProduct += v1[i] * v2[i];
+    }
+    return dotProduct;
+  }
+
   Future<List<double>> _getFaceEmbedding(String imagePath, Face face) async {
     final imageFile = File(imagePath);
     final imageBytes = await imageFile.readAsBytes();
@@ -710,9 +646,10 @@ class _CameraScreenState extends State<CameraScreen> {
 
     var output = List<List<double>>.filled(1, List<double>.filled(128, 0));
     _interpreter.run(input, output);
-
-    print('Generated embedding sample: ${output[0].sublist(0, 5)}...');
-    return output[0];
+    List<double> embedding = output[0];
+    List<double> normalizedEmbedding = normalizeEmbedding(embedding);
+    print('Normalized embedding sample: ${normalizedEmbedding.sublist(0, 5)}...');
+    return normalizedEmbedding;
   }
 
   double _calculateEuclideanDistance(List<double> embedding1, List<double> embedding2) {
@@ -728,26 +665,42 @@ class _CameraScreenState extends State<CameraScreen> {
     print('Comparing embedding with Firestore');
     print('New embedding sample: ${newEmbedding.sublist(0, 5)}...');
     final QuerySnapshot snapshot = await _firestore.collection('students').get();
-    const double threshold = 0.6;
+    const double euclideanThreshold = 0.6;
+    const double cosineThreshold = 0.7;
     Map<String, dynamic>? bestMatch;
-    double minDistance = double.infinity;
+    double minEuclideanDistance = double.infinity;
+    double maxCosineSimilarity = -1.0;
+
+    List<double> normalizedNewEmbedding = normalizeEmbedding(newEmbedding);
 
     for (var doc in snapshot.docs) {
       final data = doc.data() as Map<String, dynamic>;
-      final storedEmbedding = (data['faceEmbedding'] as List<dynamic>).cast<double>();
-      final distance = _calculateEuclideanDistance(newEmbedding, storedEmbedding);
-      print('Distance to ${data['username']} (Roll No: ${data['rollNo']}): $distance');
-      if (distance < minDistance) {
-        minDistance = distance;
+      final storedEmbeddingDynamic = data['faceEmbedding'] as List<dynamic>;
+      List<double> storedEmbedding = storedEmbeddingDynamic.cast<double>();
+      List<double> normalizedStoredEmbedding = normalizeEmbedding(storedEmbedding);
+
+      final euclideanDistance = _calculateEuclideanDistance(normalizedNewEmbedding, normalizedStoredEmbedding);
+      final cosineSim = cosineSimilarity(normalizedNewEmbedding, normalizedStoredEmbedding);
+
+      print('To ${data['username']} (Roll No: ${data['rollNo']}): '
+          'Euclidean Distance = $euclideanDistance, Cosine Similarity = $cosineSim');
+
+      if (euclideanDistance < minEuclideanDistance) {
+        minEuclideanDistance = euclideanDistance;
+        maxCosineSimilarity = cosineSim;
         bestMatch = data;
       }
     }
 
-    if (minDistance < threshold && bestMatch != null) {
-      print('Best match found: ${bestMatch['username']} with distance $minDistance');
+    if (minEuclideanDistance < euclideanThreshold &&
+        maxCosineSimilarity > cosineThreshold &&
+        bestMatch != null) {
+      print('Best match found: ${bestMatch['username']} with '
+          'Euclidean Distance $minEuclideanDistance, Cosine Similarity $maxCosineSimilarity');
       return bestMatch;
     } else {
-      print('No match found within threshold $threshold, closest distance was $minDistance');
+      print('No match found. Closest: Euclidean Distance = $minEuclideanDistance, '
+          'Cosine Similarity = $maxCosineSimilarity');
       return null;
     }
   }
